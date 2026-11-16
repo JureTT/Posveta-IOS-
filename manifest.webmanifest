@@ -1,0 +1,15 @@
+{
+  "name": "Posveta Isusu Kristu po Mariji",
+  "short_name": "Posveta",
+  "description": "34-dnevna priprema za posvetu Isusu Kristu po Mariji",
+  "lang": "hr",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#16396B",
+  "theme_color": "#16396B",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
