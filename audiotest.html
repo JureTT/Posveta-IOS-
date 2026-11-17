@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="hr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Probni zvuk</title>
+<style>body{font:18px/1.5 -apple-system,Segoe UI,sans-serif;margin:0;padding:20px;max-width:560px}
+h1{font-size:22px}.box{border:1px solid #ccc;border-radius:12px;padding:12px 14px;margin:14px 0}
+audio{width:100%}.ok{color:#0a7a2f;font-weight:700}.no{color:#b00020;font-weight:700}code{font-size:14px}</style></head>
+<body>
+<h1>Probni zvuk</h1>
+<p>Pritisnite ▶ na svakom playeru ispod i recite koji zvuk čujete.</p>
+<div class="box"><b>A) Original (OGG/Opus, 2,5 MB)</b><br><audio controls preload="none" src="test_dan01.ogg"></audio>
+<div id="ra"></div></div>
+<div class="box"><b>B) M4A (AAC)</b><br><audio controls preload="none" src="test_dan01.m4a"></audio>
+<div id="rb"></div></div>
+<div class="box"><b>C) MP3</b><br><audio controls preload="none" src="test_dan01.mp3"></audio>
+<div id="rc"></div></div>
+<div class="box"><b>Što preglednik kaže da podržava</b><div id="can"></div></div>
+<script>
+var a=document.createElement('audio');
+var t=[['OGG Opus','audio/ogg; codecs=opus'],['OGG Vorbis','audio/ogg; codecs=vorbis'],['WebM Opus','audio/webm; codecs=opus'],['M4A AAC','audio/mp4; codecs="mp4a.40.2"'],['MP3','audio/mpeg']];
+document.getElementById('can').innerHTML=t.map(function(x){var r=a.canPlayType(x[1]);return x[0]+': <span class="'+(r?'ok':'no')+'">'+(r||'ne')+'</span>';}).join('<br>')+'<br><br><code>'+navigator.userAgent+'</code>';
+['ra','rb','rc'].forEach(function(id,i){var el=document.querySelectorAll('audio')[i];
+ el.addEventListener('error',function(){document.getElementById(id).innerHTML='<span class="no">Ne može se reproducirati (greška '+(el.error?el.error.code:'?')+')</span>';});
+ el.addEventListener('playing',function(){document.getElementById(id).innerHTML='<span class="ok">Svira ✓</span>';});});
+</script></body></html>
