@@ -148,7 +148,7 @@ const TTS = {
 
 /* ---------- recordings (streamed from the recordings site) ---------- */
 const AUDIO = {
-  base: 'https://jurett.github.io/posveta-snimke/audio/mp3/',
+  base: 'https://jurett.github.io/Posveta-snimke/audio/mp3/',
   days: 33, /* dan 34 nema snimke */
   intro: {priprema: 'uvod_priprema', razmatranje: 'uvod_razmatranje', krunica: 'uvod_napomena_za_krunicu'}
 };
