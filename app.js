@@ -33,6 +33,8 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>'
 const epochOf = (y, m, d) => Math.round(Date.UTC(y, m - 1, d) / 86400000);
 const todayEpoch = () => { const n = new Date(); return epochOf(n.getFullYear(), n.getMonth() + 1, n.getDate()); };
 const fmtDate = e => { const d = new Date(e * 86400000); return d.getUTCDate() + '.' + (d.getUTCMonth() + 1) + '.' + d.getUTCFullYear() + '.'; };
+const WD = ['ned', 'pon', 'uto', 'sri', 'čet', 'pet', 'sub'];
+const fmtDateWd = e => { const d = new Date(e * 86400000); return WD[d.getUTCDay()] + ', ' + d.getUTCDate() + '. ' + (d.getUTCMonth() + 1) + '. ' + d.getUTCFullYear() + '.'; };
 const isoOf = e => new Date(e * 86400000).toISOString().slice(0, 10);
 
 let DAYS = [], INTRO = [], PRAYERS = [], BOOK_TITLE = 'Posveta Isusu Kristu po Mariji';
@@ -56,6 +58,7 @@ function applyTheme() {
   r.setProperty('--sec', p.sec); r.setProperty('--primary', p.primary); r.setProperty('--onprimary', p.onprimary);
   r.setProperty('--accent', p.accent); r.setProperty('--border', p.border);
   r.setProperty('--scale', SCALES[scaleIndex()]);
+  document.body.classList.toggle('justify', store.get('justify', true));
   let m = document.querySelector('meta[name=theme-color]');
   if (m) m.setAttribute('content', p.bg);
 }
@@ -92,8 +95,16 @@ const TTS = {
     this.i = idx < 0 ? 0 : idx;
   },
   supported() { return 'speechSynthesis' in window && 'SpeechSynthesisUtterance' in window; },
-  voices() { try { return speechSynthesis.getVoices().filter(v => /^hr/i.test(v.lang)).slice(0, 5); } catch (e) { return []; } },
-  voice() { const l = this.voices(); const n = store.get('voice', null); return l.find(v => v.name === n) || l[0] || null; },
+  vkey(v) { return (v.voiceURI || '') + '|' + v.name + '|' + v.lang; },
+  voices() {
+    try {
+      const seen = new Set(), out = [];
+      speechSynthesis.getVoices().filter(v => /^hr/i.test(v.lang)).forEach(v => { const k = this.vkey(v); if (!seen.has(k)) { seen.add(k); out.push(v); } });
+      return out.slice(0, 5);
+    } catch (e) { return []; }
+  },
+  vindex() { const l = this.voices(), n = store.get('voice', null); const i = l.findIndex(v => this.vkey(v) === n || v.name === n); return i < 0 ? 0 : i; },
+  voice() { const l = this.voices(); return l[this.vindex()] || null; },
   rate() { return SPEEDS[Math.min(Math.max(store.get('speed', 1), 0), SPEEDS.length - 1)]; },
   par() { return this.segs.length ? this.segs[this.i].par : 0; },
   speak(i) {
@@ -279,16 +290,15 @@ const optionCount = () => (TTS.supported() ? TTS.voices().length : 0) + (hasRec(
 
 function cycleSource() {
   const vs = TTS.supported() ? TTS.voices() : [];
-  const opts = vs.map(v => v.name);
-  if (hasRec()) opts.push('@rec');
-  if (opts.length < 2) return;
-  const cur = curMode() === 'rec' ? '@rec' : (TTS.voice() ? TTS.voice().name : opts[0]);
-  const next = opts[(opts.indexOf(cur) + 1) % opts.length];
+  const n = vs.length + (hasRec() ? 1 : 0);
+  if (n < 2) return;
+  const cur = curMode() === 'rec' ? vs.length : TTS.vindex();   /* indeks: glasovi 0..n-1, snimka zadnja */
+  const next = (cur + 1) % n;
   const e = eng();
   const wasPlaying = e.state === 'playing' || e.state === 'loading';
   e.stop();
-  if (next === '@rec') store.set('mode', 'rec');
-  else { store.set('mode', 'tts'); store.set('voice', next); }
+  if (next === vs.length && hasRec()) store.set('mode', 'rec');
+  else { store.set('mode', 'tts'); store.set('voice', TTS.vkey(vs[next])); }
   if (wasPlaying) eng().play(); else updateTtsUi();
 }
 
@@ -321,7 +331,7 @@ function updateTtsUi() {
   const vs = TTS.supported() ? TTS.voices() : [], vb = document.getElementById('ttsVoice');
   vb.style.display = optionCount() > 1 ? '' : 'none';
   if (m === 'rec') { vb.innerHTML = ICON.mic; vb.setAttribute('aria-label', 'Izvor: snimka'); }
-  else { vb.textContent = '♪ ' + (Math.max(vs.indexOf(TTS.voice()), 0) + 1); vb.setAttribute('aria-label', 'Izvor: računalni glas'); }
+  else { vb.textContent = '♪ ' + (TTS.vindex() + 1); vb.setAttribute('aria-label', 'Izvor: računalni glas'); }
   let msg = '';
   if (m === 'rec') {
     if (REC.state === 'error') msg = 'Snimka se ne može učitati. Provjerite internetsku vezu ili odaberite računalni glas.';
@@ -377,6 +387,8 @@ function renderHome() {
     <div id="feastBox"></div>
     <div class="row" style="align-items:center;margin-top:14px"><span style="flex:1">Veličina slova</span>
       <button data-act="font-" aria-label="Manja slova">A−</button><button data-act="font+" aria-label="Veća slova">A+</button></div>
+    <div class="row" style="align-items:center;margin-top:14px"><span style="flex:1">Obostrano poravnanje teksta</span>
+      <button data-act="justify" style="flex:0 0 auto;min-width:110px">${store.get('justify', true) ? 'Uključeno' : 'Isključeno'}</button></div>
     <div class="swatches">${sw}</div>
     <div class="box"><div class="sec">UVOD</div>${links(INTRO, 'intro')}</div>
     <div class="box"><div class="sec">MOLITVE</div>${links(PRAYERS, 'prayer')}</div>
@@ -390,15 +402,16 @@ function renderDays() {
     <div class="box daylist">${DAYS.map((d, i) => `<button class="link" data-go="#/day/${i}"><span>${ds.has(i) ? '✓' : (inS && i === t ? '●' : '○')}</span><span>${i + 1}. ${esc(d.title)}</span></button>`).join('')}</div>`;
 }
 
-function renderDay(i) {
+function renderDay(i, toReading) {
   if (!(i >= 0 && i < total())) { location.hash = '#/'; return; }
   const d = DAYS[i], isToday = i === todayIndex() && inSeries();
+  const sd = startDay(), dateTxt = sd === null ? '' : ' · ' + fmtDateWd(sd + i);
   PAGE = {key: 'day:' + i, text: d.text, audio: dayAudio(i), title: d.title};
   const prayers = (d.prayers || []).map(id => PRAYERS.find(p => p.id === id)).filter(Boolean);
-  const pbox = prayers.length ? `<div class="box"><div class="muted">Molitve za danas:</div>${prayers.map(p => `<button class="link" data-go="#/page/prayer/${esc(p.id)}">› ${esc(p.title)}</button>`).join('')}</div>` : '';
+  const pbox = prayers.length ? `<div class="box"><div class="muted">Molitve za danas:</div>${prayers.map(p => `<button class="link" data-go="#/page/prayer/${esc(p.id)}?day=${i}">› ${esc(p.title)}</button>`).join('')}</div>` : '';
   app().innerHTML = `
     <div class="top"><button data-act="back">‹ Natrag</button></div>
-    <div class="muted">Dan ${i + 1} od ${total()}${isToday ? ' · danas' : ''}</div>
+    <div class="muted">Dan ${i + 1} od ${total()}${dateTxt}${isToday ? ' · danas' : ''}</div>
     <h2 class="day">${esc(d.title)}</h2>
     ${pbox}
     <div class="box">${ttsHtml()}</div>
@@ -412,10 +425,24 @@ function renderDay(i) {
   if (PAGE.audio) REC.load(PAGE.key, PAGE.audio);
   updateTtsUi();
   const y = store.get('scroll_' + i, 0);
-  if (y > 0) window.scrollTo(0, y);
+  if (toReading) { const t = document.getElementById('tts'); if (t) window.scrollTo(0, Math.max(t.getBoundingClientRect().top + window.scrollY - 16, 0)); }
+  else if (y > 0) window.scrollTo(0, y);
 }
 
-function renderPage(kind, id) {
+function nextTarget(kind, id, dayCtx) {
+  if (kind !== 'prayer' || dayCtx === null || !(dayCtx >= 0 && dayCtx < total())) return null;
+  const ids = (DAYS[dayCtx].prayers || []).filter(x => PRAYERS.some(p => p.id === x));
+  const k = ids.indexOf(id);
+  if (k < 0) return null;
+  return k + 1 < ids.length ? '#/page/prayer/' + ids[k + 1] + '?day=' + dayCtx : '#/day/' + dayCtx + '?r=1';
+}
+function navHtml(kind, id, dayCtx) {
+  const nx = nextTarget(kind, id, dayCtx);
+  if (!nx) return '<button class="block" data-act="back">‹ Natrag</button>';
+  return `<div class="row"><button data-act="back">‹ Natrag</button><button class="primary" data-go="${esc(nx)}">Naprijed ›</button></div>`;
+}
+
+function renderPage(kind, id, dayCtx) {
   const page = (kind === 'intro' ? INTRO : PRAYERS).find(p => p.id === id);
   if (!page) { location.hash = '#/'; return; }
   PAGE = {key: 'page:' + kind + ':' + id, text: page.text, audio: kind === 'intro' ? introAudio(id) : null, title: page.title};
@@ -424,7 +451,7 @@ function renderPage(kind, id) {
     <h2 class="day">${esc(page.title)}</h2>
     <div class="box">${ttsHtml()}</div>
     <div class="body">${bodyHtml(page.text)}</div>
-    <button class="block" data-act="back">‹ Natrag</button>`;
+    ${navHtml(kind, id, dayCtx)}`;
   TTS.load('page:' + kind + ':' + id, page.text);
   if (PAGE.audio) REC.load(PAGE.key, PAGE.audio);
   updateTtsUi();
@@ -433,11 +460,11 @@ function renderPage(kind, id) {
 /* ---------- router ---------- */
 let currentRoute = '';
 function saveScroll() {
-  const m = /^#\/day\/(\d+)$/.exec(currentRoute);
+  const m = /^#\/day\/(\d+)(?:\?.*)?$/.exec(currentRoute);
   if (m) store.set('scroll_' + m[1], Math.round(window.scrollY));
 }
 function saveNote() {
-  const m = /^#\/day\/(\d+)$/.exec(currentRoute), ta = document.getElementById('note');
+  const m = /^#\/day\/(\d+)(?:\?.*)?$/.exec(currentRoute), ta = document.getElementById('note');
   if (m && ta) { ta.value.trim() ? store.set('note_' + m[1], ta.value) : store.del('note_' + m[1]); }
 }
 function route() {
@@ -450,8 +477,8 @@ function route() {
   let m;
   if (h === '#/' || h === '') renderHome();
   else if (h === '#/days') renderDays();
-  else if ((m = /^#\/day\/(\d+)$/.exec(h))) renderDay(parseInt(m[1], 10));
-  else if ((m = /^#\/page\/(intro|prayer)\/([\w-]+)$/.exec(h))) renderPage(m[1], m[2]);
+  else if ((m = /^#\/day\/(\d+)(\?r=1)?$/.exec(h))) renderDay(parseInt(m[1], 10), !!m[2]);
+  else if ((m = /^#\/page\/(intro|prayer)\/([\w-]+)(?:\?day=(\d+))?$/.exec(h))) renderPage(m[1], m[2], m[3] === undefined ? null : parseInt(m[3], 10));
   else renderHome();
 }
 window.addEventListener('hashchange', route);
@@ -495,6 +522,7 @@ document.addEventListener('click', e => {
     case 'feast': store.set('start', parseInt(el.dataset.start, 10)); renderHome(); break;
     case 'theme': store.set('theme', el.dataset.id); applyTheme(); renderHome(); break;
     case 'font+': store.set('scale', Math.min(scaleIndex() + 1, SCALES.length - 1)); applyTheme(); break;
+    case 'justify': store.set('justify', !store.get('justify', true)); applyTheme(); renderHome(); break;
     case 'font-': store.set('scale', Math.max(scaleIndex() - 1, 0)); applyTheme(); break;
     case 'done': { const i = parseInt(el.dataset.i, 10), v = !isDone(i); setDone(i, v); el.textContent = v ? '✓ Završeno' : 'Označi kao završeno'; break; }
     case 'share-notes': shareNotes(); break;
