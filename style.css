@@ -42,3 +42,6 @@ dialog button{margin-top:8px;width:100%}
 .hint{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:10px 14px;margin:14px 0;font-size:.9em}
 input[type=date]{font:inherit;min-height:44px;padding:6px 10px;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:var(--text)}
 .body p{white-space:pre-line}
+
+.pbar{height:4px;border-radius:2px;background:var(--border);overflow:hidden;margin:10px 2px 0}
+.pbar>div{height:100%;width:0;background:var(--primary);transition:width .3s linear}

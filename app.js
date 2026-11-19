@@ -145,16 +145,119 @@ const TTS = {
   notify() { updateTtsUi(); }
 };
 
+
+/* ---------- recordings (streamed from the recordings site) ---------- */
+const AUDIO = {
+  base: 'https://jurett.github.io/posveta-snimke/audio/mp3/',
+  days: 33, /* dan 34 nema snimke */
+  intro: {priprema: 'uvod_priprema', razmatranje: 'uvod_razmatranje', krunica: 'uvod_napomena_za_krunicu'}
+};
+const dayAudio = i => (i >= 0 && i < AUDIO.days) ? AUDIO.base + 'dan' + String(i + 1).padStart(2, '0') + '.mp3' : null;
+const introAudio = id => AUDIO.intro[id] ? AUDIO.base + AUDIO.intro[id] + '.mp3' : null;
+const fmtTime = t => { t = Math.max(0, Math.floor(t || 0)); const m = Math.floor(t / 60), s = t % 60; return m + ':' + String(s).padStart(2, '0'); };
+let PAGE = {key: '', text: '', audio: null, title: ''};
+
+const REC = {
+  a: null, key: '', url: '', state: 'idle', pos: 0, pendingSeek: null, lastSave: 0,
+  load(key, url) {
+    if (this.key === key && this.url === url) return;
+    this.stop();
+    this.key = key; this.url = url;
+    this.pos = store.get('rp_' + key, 0);
+  },
+  rate() { return SPEEDS[Math.min(Math.max(store.get('speed', 1), 0), SPEEDS.length - 1)]; },
+  ensure() {
+    if (this.a) return this.a;
+    const a = new Audio();
+    a.preload = 'none';
+    a.addEventListener('loadedmetadata', () => {
+      if (this.pendingSeek !== null) {
+        const t = this.pendingSeek; this.pendingSeek = null;
+        if (t > 1 && (!isFinite(a.duration) || t < a.duration - 3)) { try { a.currentTime = t; } catch (e) { /* ignore */ } }
+      }
+      this.notify();
+    });
+    a.addEventListener('playing', () => { this.state = 'playing'; this.notify(); });
+    a.addEventListener('waiting', () => { if (this.state === 'playing') { this.state = 'loading'; this.notify(); } });
+    a.addEventListener('pause', () => { if (this.state === 'playing' || this.state === 'loading') { this.state = 'paused'; this.savePos(true); this.notify(); } });
+    a.addEventListener('ended', () => { this.state = 'idle'; this.pos = 0; store.set('rp_' + this.key, 0); this.notify(); });
+    a.addEventListener('error', () => { if (this.url) { this.state = 'error'; this.notify(); } });
+    a.addEventListener('timeupdate', () => { this.savePos(false); updateProgress(); });
+    this.a = a;
+    try {
+      if ('mediaSession' in navigator) {
+        const ms = navigator.mediaSession;
+        ms.setActionHandler('play', () => this.play());
+        ms.setActionHandler('pause', () => this.pause());
+        ms.setActionHandler('seekbackward', () => this.skip(-15));
+        ms.setActionHandler('seekforward', () => this.skip(15));
+      }
+    } catch (e) { /* ignore */ }
+    return a;
+  },
+  loaded() { return !!(this.a && this.a.dataset.url === this.url && this.a.readyState > 0); },
+  savePos(force) {
+    if (!this.a || this.a.dataset.url !== this.url) return;
+    const now = Date.now();
+    if (!force && now - this.lastSave < 3000) return;
+    this.lastSave = now;
+    this.pos = this.a.currentTime || 0;
+    store.set('rp_' + this.key, Math.floor(this.pos));
+  },
+  play() {
+    if (!this.url) return;
+    const a = this.ensure();
+    if (a.dataset.url !== this.url) {
+      this.pendingSeek = this.pos;
+      a.dataset.url = this.url;
+      a.src = this.url;
+    }
+    a.playbackRate = this.rate();
+    this.state = 'loading'; this.notify();
+    try {
+      if ('mediaSession' in navigator) navigator.mediaSession.metadata = new MediaMetadata({title: PAGE.title || 'Snimka', artist: BOOK_TITLE});
+    } catch (e) { /* ignore */ }
+    const pr = a.play();
+    if (pr && pr.catch) pr.catch(err => { if (err && err.name === 'AbortError') return; this.state = 'error'; this.notify(); });
+  },
+  pause() { this.state = 'paused'; if (this.a) { this.a.pause(); this.savePos(true); } this.notify(); },
+  toggle() { (this.state === 'playing' || this.state === 'loading') ? this.pause() : this.play(); },
+  stop() {
+    this.state = 'idle';
+    if (this.a && this.a.dataset.url === this.url) { this.savePos(true); }
+    if (this.a) this.a.pause();
+  },
+  restart() {
+    this.pos = 0; store.set('rp_' + this.key, 0);
+    if (this.loaded()) { this.a.currentTime = 0; this.pendingSeek = null; } else this.pendingSeek = null;
+    this.play();
+  },
+  skip(d) {
+    if (this.loaded()) {
+      const dur = isFinite(this.a.duration) ? this.a.duration : Infinity;
+      this.a.currentTime = Math.min(Math.max(this.a.currentTime + d, 0), dur);
+      this.savePos(true);
+    } else {
+      this.pos = Math.max(0, this.pos + d);
+      store.set('rp_' + this.key, Math.floor(this.pos));
+    }
+    this.notify();
+  },
+  applyRate() { if (this.a) this.a.playbackRate = this.rate(); this.notify(); },
+  notify() { updateTtsUi(); }
+};
+
 const ICON = {
   play: '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>',
   pause: '<svg viewBox="0 0 24 24"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>',
   restart: '<svg viewBox="0 0 24 24"><path d="M12 5V2L7 6.5 12 11V8a5 5 0 1 1-5 5H5a7 7 0 1 0 7-8z"/></svg>',
   prev: '<svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zM20 6v12L9.5 12z"/></svg>',
-  next: '<svg viewBox="0 0 24 24"><path d="M16 6h2v12h-2zM4 6l10.5 6L4 18z"/></svg>'
+  next: '<svg viewBox="0 0 24 24"><path d="M16 6h2v12h-2zM4 6l10.5 6L4 18z"/></svg>',
+  mic: '<svg viewBox="0 0 24 24"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11z"/></svg>'
 };
 
 function ttsHtml() {
-  if (!TTS.supported()) return '<div class="hint">Čitanje naglas nije dostupno u ovom pregledniku.</div>';
+  if (!TTS.supported() && !PAGE.audio) return '<div class="hint">Čitanje naglas nije dostupno u ovom pregledniku.</div>';
   return `<div class="tts" id="tts">
     <button class="main primary" data-act="tts-toggle" id="ttsPlay" aria-label="Čitaj naglas">${ICON.play}</button>
     <button data-act="tts-restart" aria-label="Čitaj od početka">${ICON.restart}</button>
@@ -162,28 +265,80 @@ function ttsHtml() {
     <button data-act="tts-next" aria-label="Sljedeći odlomak">${ICON.next}</button>
     <button class="small" data-act="tts-speed" id="ttsSpeed"></button>
     <button class="small" data-act="tts-voice" id="ttsVoice" style="display:none"></button>
-  </div><div class="ttsStatus" id="ttsStatus"></div>`;
+  </div><div class="pbar" aria-hidden="true"><div id="pbarFill"></div></div><div class="ttsStatus" id="ttsStatus"></div>`;
+}
+
+const hasRec = () => !!PAGE.audio;
+function curMode() {
+  if (!hasRec()) return 'tts';
+  if (!TTS.supported() || !TTS.voices().length) return 'rec';
+  return store.get('mode', 'rec') === 'tts' ? 'tts' : 'rec';
+}
+const eng = () => curMode() === 'rec' ? REC : TTS;
+const optionCount = () => (TTS.supported() ? TTS.voices().length : 0) + (hasRec() ? 1 : 0);
+
+function cycleSource() {
+  const vs = TTS.supported() ? TTS.voices() : [];
+  const opts = vs.map(v => v.name);
+  if (hasRec()) opts.push('@rec');
+  if (opts.length < 2) return;
+  const cur = curMode() === 'rec' ? '@rec' : (TTS.voice() ? TTS.voice().name : opts[0]);
+  const next = opts[(opts.indexOf(cur) + 1) % opts.length];
+  const e = eng();
+  const wasPlaying = e.state === 'playing' || e.state === 'loading';
+  e.stop();
+  if (next === '@rec') store.set('mode', 'rec');
+  else { store.set('mode', 'tts'); store.set('voice', next); }
+  if (wasPlaying) eng().play(); else updateTtsUi();
+}
+
+function updateProgress() {
+  const fill = document.getElementById('pbarFill');
+  if (!fill) return;
+  let f = 0;
+  if (curMode() === 'rec') {
+    const a = REC.a;
+    if (REC.loaded() && isFinite(a.duration) && a.duration > 0) f = a.currentTime / a.duration;
+  } else if (TTS.pars.length) f = (TTS.par() + (TTS.state === 'idle' ? 0 : 1)) / TTS.pars.length;
+  fill.style.width = Math.min(Math.max(f, 0), 1) * 100 + '%';
+  if (curMode() === 'rec' && (REC.state === 'playing' || REC.state === 'paused')) {
+    const st = document.getElementById('ttsStatus');
+    if (st && REC.loaded()) st.textContent = 'Snimka · ' + fmtTime(REC.a.currentTime) + (isFinite(REC.a.duration) ? ' / ' + fmtTime(REC.a.duration) : '');
+  }
 }
 
 function updateTtsUi() {
   const play = document.getElementById('ttsPlay');
   if (!play) return;
-  const playing = TTS.state === 'playing';
+  const m = curMode(), e = eng();
+  const playing = e.state === 'playing' || (m === 'rec' && e.state === 'loading');
   play.innerHTML = playing ? ICON.pause : ICON.play;
-  play.setAttribute('aria-label', playing ? 'Pauza' : 'Čitaj naglas');
+  play.setAttribute('aria-label', playing ? 'Pauza' : (m === 'rec' ? 'Slušaj snimku' : 'Čitaj naglas'));
+  const prev = document.querySelector('[data-act=tts-prev]'), next = document.querySelector('[data-act=tts-next]');
+  if (prev) prev.setAttribute('aria-label', m === 'rec' ? 'Natrag 15 sekundi' : 'Prethodni odlomak');
+  if (next) next.setAttribute('aria-label', m === 'rec' ? 'Naprijed 15 sekundi' : 'Sljedeći odlomak');
   document.getElementById('ttsSpeed').textContent = TTS.rate() + '×';
-  const vs = TTS.voices(), vb = document.getElementById('ttsVoice');
-  vb.style.display = vs.length > 1 ? '' : 'none';
-  vb.textContent = '♪ ' + (Math.max(vs.indexOf(TTS.voice()), 0) + 1);
+  const vs = TTS.supported() ? TTS.voices() : [], vb = document.getElementById('ttsVoice');
+  vb.style.display = optionCount() > 1 ? '' : 'none';
+  if (m === 'rec') { vb.innerHTML = ICON.mic; vb.setAttribute('aria-label', 'Izvor: snimka'); }
+  else { vb.textContent = '♪ ' + (Math.max(vs.indexOf(TTS.voice()), 0) + 1); vb.setAttribute('aria-label', 'Izvor: računalni glas'); }
   let msg = '';
-  if (TTS.state === 'playing' || TTS.state === 'paused') msg = 'Odlomak ' + (TTS.par() + 1) + ' od ' + TTS.pars.length;
-  else if (TTS.state === 'error') msg = 'Čitanje naglas nije uspjelo.';
-  else if (!vs.length && speechSynthesis.getVoices().length) msg = 'Hrvatski glas nije pronađen. Na iPhoneu: Postavke → Pristupačnost → Izgovoreni sadržaj → Glasovi → Hrvatski.';
+  if (m === 'rec') {
+    if (REC.state === 'error') msg = 'Snimka se ne može učitati. Provjerite internetsku vezu ili odaberite računalni glas.';
+    else if (REC.state === 'loading') msg = 'Učitavam snimku…';
+    else if (REC.state === 'playing' || REC.state === 'paused') msg = REC.loaded() ? 'Snimka · ' + fmtTime(REC.a.currentTime) + (isFinite(REC.a.duration) ? ' / ' + fmtTime(REC.a.duration) : '') : 'Snimka';
+    else msg = 'Snimka' + (REC.pos > 1 ? ' · nastavak od ' + fmtTime(REC.pos) : '');
+  } else {
+    if (TTS.state === 'playing' || TTS.state === 'paused') msg = 'Odlomak ' + (TTS.par() + 1) + ' od ' + TTS.pars.length;
+    else if (TTS.state === 'error') msg = 'Čitanje naglas nije uspjelo.';
+    else if (!vs.length && TTS.supported() && speechSynthesis.getVoices().length) msg = 'Hrvatski glas nije pronađen. Na iPhoneu: Postavke → Pristupačnost → Izgovoreni sadržaj → Glasovi → Hrvatski.';
+  }
   document.getElementById('ttsStatus').textContent = msg;
-  document.querySelectorAll('.body .cur').forEach(e => e.classList.remove('cur'));
-  if (playing || TTS.state === 'paused') {
+  updateProgress();
+  document.querySelectorAll('.body .cur').forEach(x => x.classList.remove('cur'));
+  if (m === 'tts' && (TTS.state === 'playing' || TTS.state === 'paused')) {
     const el = document.querySelector(`.body [data-p="${TTS.par()}"]`);
-    if (el) { el.classList.add('cur'); if (playing) el.scrollIntoView({block: 'center', behavior: 'smooth'}); }
+    if (el) { el.classList.add('cur'); if (TTS.state === 'playing') el.scrollIntoView({block: 'center', behavior: 'smooth'}); }
   }
 }
 if (TTS.supported()) { try { speechSynthesis.onvoiceschanged = () => updateTtsUi(); } catch (e) { /* ignore */ } }
@@ -238,6 +393,7 @@ function renderDays() {
 function renderDay(i) {
   if (!(i >= 0 && i < total())) { location.hash = '#/'; return; }
   const d = DAYS[i], isToday = i === todayIndex() && inSeries();
+  PAGE = {key: 'day:' + i, text: d.text, audio: dayAudio(i), title: d.title};
   const prayers = (d.prayers || []).map(id => PRAYERS.find(p => p.id === id)).filter(Boolean);
   const pbox = prayers.length ? `<div class="box"><div class="muted">Molitve za danas:</div>${prayers.map(p => `<button class="link" data-go="#/page/prayer/${esc(p.id)}">› ${esc(p.title)}</button>`).join('')}</div>` : '';
   app().innerHTML = `
@@ -253,6 +409,7 @@ function renderDay(i) {
     <div class="row"><button data-go="#/day/${i - 1}" ${i === 0 ? 'disabled' : ''}>‹ Prethodni</button><button data-go="#/day/${i + 1}" ${i === total() - 1 ? 'disabled' : ''}>Sljedeći ›</button></div>
     <div class="row"><button data-go="#/">Naslovnica</button><button data-go="#/days">Svi dani</button></div>`;
   TTS.load('day:' + i, d.text);
+  if (PAGE.audio) REC.load(PAGE.key, PAGE.audio);
   updateTtsUi();
   const y = store.get('scroll_' + i, 0);
   if (y > 0) window.scrollTo(0, y);
@@ -261,6 +418,7 @@ function renderDay(i) {
 function renderPage(kind, id) {
   const page = (kind === 'intro' ? INTRO : PRAYERS).find(p => p.id === id);
   if (!page) { location.hash = '#/'; return; }
+  PAGE = {key: 'page:' + kind + ':' + id, text: page.text, audio: kind === 'intro' ? introAudio(id) : null, title: page.title};
   app().innerHTML = `
     <div class="top"><button data-act="back">‹ Natrag</button></div>
     <h2 class="day">${esc(page.title)}</h2>
@@ -268,6 +426,7 @@ function renderPage(kind, id) {
     <div class="body">${bodyHtml(page.text)}</div>
     <button class="block" data-act="back">‹ Natrag</button>`;
   TTS.load('page:' + kind + ':' + id, page.text);
+  if (PAGE.audio) REC.load(PAGE.key, PAGE.audio);
   updateTtsUi();
 }
 
@@ -283,7 +442,8 @@ function saveNote() {
 }
 function route() {
   saveScroll(); saveNote();
-  TTS.stop();
+  TTS.stop(); REC.stop();
+  PAGE = {key: '', text: '', audio: null, title: ''};
   const h = location.hash || '#/';
   currentRoute = h;
   window.scrollTo(0, 0);
@@ -339,12 +499,12 @@ document.addEventListener('click', e => {
     case 'done': { const i = parseInt(el.dataset.i, 10), v = !isDone(i); setDone(i, v); el.textContent = v ? '✓ Završeno' : 'Označi kao završeno'; break; }
     case 'share-notes': shareNotes(); break;
     case 'reset': if (confirm('Počinjete iznova? Datum početka i oznake završenih dana bit će obrisani (bilješke ostaju).')) { store.del('start'); store.del('done'); renderHome(); } break;
-    case 'tts-toggle': TTS.toggle(); break;
-    case 'tts-restart': TTS.restart(); break;
-    case 'tts-prev': TTS.skip(-1); break;
-    case 'tts-next': TTS.skip(1); break;
-    case 'tts-speed': TTS.cycleSpeed(); break;
-    case 'tts-voice': TTS.cycleVoice(); break;
+    case 'tts-toggle': eng().toggle(); break;
+    case 'tts-restart': eng().restart(); break;
+    case 'tts-prev': curMode() === 'rec' ? REC.skip(-15) : TTS.skip(-1); break;
+    case 'tts-next': curMode() === 'rec' ? REC.skip(15) : TTS.skip(1); break;
+    case 'tts-speed': store.set('speed', (store.get('speed', 1) + 1) % SPEEDS.length); curMode() === 'rec' ? REC.applyRate() : (TTS.state === 'playing' ? TTS.speak(TTS.i) : TTS.notify()); break;
+    case 'tts-voice': cycleSource(); break;
   }
 });
 document.addEventListener('change', e => {
